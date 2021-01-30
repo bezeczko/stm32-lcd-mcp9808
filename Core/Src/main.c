@@ -62,9 +62,6 @@ __IO int USART_TX_Busy = 0;  //nie można tej zmiennej wczytywać do rejestru,
 __IO int USART_RX_Empty = 0; //należy ją za każdym razem pobierać z pamięci, jest ulotna, jej wartość może się zmienić w każdej chwili
 __IO int USART_RX_Busy = 0;
 
-uint8_t endDetected = 0;
-uint8_t overflowWarning = 0;
-
 int interval = 2000;
 uint16_t timer = 0;
 uint8_t cycle = 0;
@@ -98,7 +95,6 @@ uint8_t showWrongCommand = 0;
 uint8_t showChecksums = 0;
 uint8_t showWrongFrameSize = 0;
 uint8_t showingMessage = 0;
-char newMessage[20];
 
 uint16_t showTimer = 0;
 
@@ -221,7 +217,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
 }
 
 unsigned char crc8(unsigned char poly, unsigned char* data, uint8_t size) {
-
+	/*
+	 * Jest to funkcja odpowiedzialna za obliczanie
+	 * sumy kontrolnej z przesłanych danych.
+	 * */
     unsigned char crc = 0x00;
     int bit;
 
@@ -241,6 +240,11 @@ unsigned char crc8(unsigned char poly, unsigned char* data, uint8_t size) {
 }
 
 void sendPayload(char* format, ...) {
+	/*
+	 * Jest to funkcja odpowiedzialna za wysyłanie
+	 * komunikatów w sposób odpowiedni dla zaprojektowanego
+	 * protokołu komunikacyjnego.
+	 * */
 	unsigned char payload[256];
 	va_list payload_list;
 	va_start(payload_list, format);
@@ -251,10 +255,20 @@ void sendPayload(char* format, ...) {
 }
 
 void commandCheck(unsigned char* data, uint8_t size, unsigned char checksum) {
+	/*
+	 * Jest to funkcja odpowiedzialna za zdekodowanie
+	 * otrzymanej komendy. Jako argumenty przyjmuje
+	 * ona przesłaną komendę, jej rozmiar oraz przesłaną
+	 * sumę kontrolną w celach jej weryfikacji.
+	 * */
 
 	unsigned char checksumCheck = crc8(0xA6, data, size);
-	uint8_t isShowing = showChecksums || showData || showDataError || showDelete || showInterval || showIntervalError || showWrongCommand || showWrongFrameSize || showUnit;
 
+	/*
+	 * Pierwszym krokiem jest obliczenie sumy kontrolnej
+	 * z otrzymanej komendy i prównanie jej z tą przesłaną.
+	 * Jeśli się zgadzają to następnie komenda jest analizowana.
+	 * */
 	if(checksum == checksumCheck) {
 		sendPayload("Checksums are correct");
 
@@ -265,42 +279,35 @@ void commandCheck(unsigned char* data, uint8_t size, unsigned char checksum) {
 		if(memcmp(data,"setunit:c",9) == 0) { //memcompare
 			sendPayload("Setting unit to Celsius.");
 			celsiusSet = 1;
-			if(isShowing) strncpy(newMessage,"unit",20);
 			showUnit = 1;
 		} else if(memcmp(data,"setunit:f",9) == 0) {
 			sendPayload("Setting unit to Farenheit.");
 			celsiusSet = 0;
-			if(isShowing) strncpy(newMessage,"unit",20);
 			showUnit = 1;
 		} else if(sscanf((const char *)data,"setint:%i",&interval_value)) { //setting interval
 			if(interval_value > 0) {
 				sendPayload("Interval set to %i", interval_value);
 				interval = interval_value;
 				showIntervalValue = interval_value;
-				if(isShowing) strncpy(newMessage,"int",20);
 				showInterval = 1;
 			} else {
 				sendPayload("Interval cannot be less than 1");
-				if(isShowing) strncpy(newMessage,"interror",20);
 				showIntervalError = 1;
 			}
 
 		} else if(sscanf((const char *)data,"read:%" SCNu16, &read_value)) { //reading saved measurement
 			if(read_value >= measurementsIndex) {
 				sendPayload("Value #%" SCNu16 " wasn't written yet", read_value);
-				if(isShowing) strncpy(newMessage,"readerror",20);
 				showDataError = 1;
 				showDataIndex = read_value;
 			} else {
 				if(celsiusSet) {
 					sendPayload("Value #%" SCNu16 ": %.2f C", read_value, measurements[read_value]);
-					if(isShowing) strncpy(newMessage,"read",20);
 					showData = 1;
 					showDataIndex = read_value;
 				} else {
 					farenheitTemp = measurements[read_value] * 9/5 + 32;
 					sendPayload("Value #%" SCNu16 ": %.2f F", read_value, farenheitTemp);
-					if(isShowing) strncpy(newMessage,"read",20);
 					showData = 1;
 					showDataIndex = read_value;
 				}
@@ -309,25 +316,33 @@ void commandCheck(unsigned char* data, uint8_t size, unsigned char checksum) {
 		} else if(memcmp(data,"deldata",7) == 0) { //deleting saved measurements
 			sendPayload("Deleting saved measurements");
 			memset(measurements, 0, sizeof measurements);
-			if(isShowing) strncpy(newMessage,"delete",20);
 			measurementsIndex = 0;
 			showDelete = 1;
 		} else {
 			sendPayload("Command not recognized");
-			if(isShowing) strncpy(newMessage,"notrecognized",20);
 			showWrongCommand = 1;
 		}
 
-	} else {
-		sendPayload("Checksums don't match!!");
-		if(isShowing) strncpy(newMessage,"checksums",20);
+	}
+	/*
+	 * Jeśli sumy kontrolne się nie zgadzają
+	 * to przesyłany oraz wyświetlany jest
+	 * odpowiedni komunikat.
+	 * */
+	else {
+		sendPayload("Checksums don't match!");
 		showChecksums = 1;
 	}
 
 }
 
 float readTemp() {
-
+	/*
+	 * Jest to funkcja odpowiedzialna za odczytywanie
+	 * termperatury z czujnika MCP9808. Zwraca ona
+	 * obliczoną temperaturę przedstawioną w stopniach
+	 * Celsjusza.
+	 * */
 	float temperature;
 	uint8_t temp[2];
 	float f_temp[2];
@@ -350,6 +365,14 @@ float readTemp() {
 }
 
 void showTemp(uint8_t i) {
+	/*
+	 * Jest to funkcja odpowiedzialna za wyświetlanie
+	 * temperatury na wyświetlaczu. Przyjmuje jako argument
+	 * i, które oznacza który odczyt chcemy wyświetlić,
+	 * np. i=0 oznacza że chcemy wyświetlić najnowszy
+	 * odczyt, a i=1 oznacza że chcemy odczytać przedostatni
+	 * odczyt.
+	 **/
 	  if(celsiusSet) {
 		  sprintf((char *)disp.f_line, "Temperature:");
 		  sprintf((char *)disp.s_line, "Celsius    %.2f", measurements[measurementsIndex - i]);
@@ -423,16 +446,27 @@ int main(void)
 
 	  if(USART_isNotEmpty()) {
 		  read_char = USART_getchar();
-		  if(read_char == 0x21) { 		//looking for the start of the frame
-			  frameStartDetected = 1;	//if found then reseting buffer for the frame
+		  /*
+		   *  Jeśli przesłany znak jest znakiem początku ramki
+		   *  to tablica w której zbierana jest ramka jest czyszczona
+		   *  (wszystkie jej elementy są zerowane) oraz indeks
+		   *  zapisywanych wartości jest również zerowany. Dodatkowo
+		   *  ustawiana na 1 jest również flaga wykrycia początku ramki,
+		   *  która jest wykorzystywana dalej w kodzie. Zerowany jest
+		   *  również indeks rozmiaru ramki.
+		   *  */
+		  if(read_char == 0x21) {
+			  frameStartDetected = 1;
 			  memset(commandBuffer, 0, sizeof commandBuffer);
 			  commandBufferSize = 0;
-		  } else if(read_char == 0x3B && frameStartDetected) { //looking for the end of the frame
-			  frameEndDetected = 1;
 		  }
-
-		  if(frameStartDetected && frameEndDetected) {	//looking if start and end of the frame was sent
-			  if(commandBufferSize > 2) {	//checking if frame isn't too short
+		  /*
+		   * Jeśli przesłany znak jest znakiem końca ramki i flaga
+		   * wykrycia początku ramki jest ustawiona wtedy otrzymana
+		   * ramka zostaje poddana analizie
+		   * */
+		  else if(read_char == 0x3B && frameStartDetected) {
+			  if(commandBufferSize > 2) {
 
 				  /*
 				   * Jeśli rozmiar ramki jest poprawny to wyciągana jest
@@ -465,17 +499,17 @@ int main(void)
 				  showWrongFrameSize = 1;
 				  sendPayload("Frame too short");
 			  }
-
-			  /*
-			   * Sprawdzenie stanu flagi startu oraz końca ramki oraz przesyłanego znaku
-			   * w momencie kiedy nie jest przesyłany znak początku ramki
-			   * (nie chcemy dodawać go do ładunku) dodawana jest treść ramki do ładunku.
-			   * W przypadku przesyłania znaków kodowanych:
-			   * - "\%" - znak początku ramki
-			   * - "\^" - znak końca ramki
-			   * Są one rozkodowywane oraz do ładunku dodawany jest rozkodowany znak
-			   * */
-		  } else if(frameStartDetected && !frameEndDetected && read_char != 0x21) {
+		  }
+		  /*
+		   * Sprawdzenie stanu flagi startu oraz końca ramki oraz przesyłanego znaku.
+		   * W momencie kiedy nie jest przesyłany znak początku ramki
+		   * (nie chcemy dodawać go do ładunku) dodawana jest treść ramki do ładunku.
+		   * W przypadku przesyłania znaków kodowanych:
+		   * - "\%" - znak początku ramki
+		   * - "\^" - znak końca ramki
+		   * Są one rozkodowywane oraz do ładunku dodawany jest rozkodowany znak
+		   * */
+		  else if(frameStartDetected && !frameEndDetected && read_char != 0x21) {
 				 if(read_char == 0x5C && escape == 0) {
 					 escape = 1;
 				 } else if(escape == 0) {
@@ -492,13 +526,18 @@ int main(void)
 					}
 					escape = 0;
 				 }
+				/*
+				 * Po każdym dodaniu znaku do ładunku zostaje
+				 * sprawdzany indeks rozmiaru ramki, który
+				 * nie może przekraczać 126 elementów
+				 * 1-125 dane + 1 CRC
+				 * */
 				if(commandBufferSize > 126) {
 					frameStartDetected = 0;
 					showWrongFrameSize = 1;
 					sendPayload("Frame too long");
 				}
 		  }
-
 	  }
 
 	  /*
@@ -513,7 +552,9 @@ int main(void)
 
 		  /*
 		   * Sprawdzane jest czy udało się poprawnie odczytać wartość
-		   * z termometra - wartość "-1000" oznacza błąd odczytu
+		   * z termometra - wartość "-1000" oznacza błąd odczytu.
+		   * Jeśli odczyt jest prawidłowy to wyświetlana jest
+		   * temperatura w odpowiedniej jednostce.
 		   * */
 		  if(measurements[measurementsIndex] != -1000) {
 			  if(showingMessage == 0) {
@@ -545,6 +586,7 @@ int main(void)
 
 	  if(showChecksums) {
 		  if(showingMessage == 0) {
+			  showingMessage = 1;
 			  showTimer = 0;
 			  showEnd = 0;
 			  sprintf((char *)disp.f_line, "   Checksums");
@@ -554,7 +596,6 @@ int main(void)
 				  sendPayload("Display error");
 			  }
 		  }
-		  showingMessage = 1;
 		  if(showEnd) {
 			  showChecksums = 0;
 			  showingMessage = 0;
@@ -562,6 +603,7 @@ int main(void)
 		  }
 	  } else if(showData) {
 		  if(showingMessage == 0) {
+			  showingMessage = 1;
 			  showTimer = 0;
 			  showEnd = 0;
 			  if(celsiusSet) {
@@ -579,7 +621,6 @@ int main(void)
 				  }
 			  }
 		  }
-		  showingMessage = 1;
 		  if(showEnd) {
 			  showData = 0;
 			  showingMessage = 0;
@@ -587,6 +628,7 @@ int main(void)
 		  }
 	  } else if(showDataError) {
 		  if(showingMessage == 0) {
+			  showingMessage = 1;
 			  showTimer = 0;
 			  showEnd = 0;
 			  sprintf((char *)disp.f_line, "Value #%d was", showDataIndex);
@@ -596,7 +638,6 @@ int main(void)
 				  sendPayload("Display error");
 			  }
 		  }
-		  showingMessage = 1;
 		  if(showEnd) {
 			  showDataError = 0;
 			  showingMessage = 0;
@@ -604,6 +645,7 @@ int main(void)
 		  }
 	  } else if(showDelete) {
 		  if(showingMessage == 0) {
+			  showingMessage = 1;
 			  showTimer = 0;
 			  showEnd = 0;
 			  sprintf((char *)disp.f_line, "All measurements");
@@ -613,7 +655,7 @@ int main(void)
 				  sendPayload("Display error");
 			  }
 		  }
-		  showingMessage = 1;
+
 		  if(showEnd) {
 			  showDelete = 0;
 			  showingMessage = 0;
@@ -621,6 +663,7 @@ int main(void)
 		  }
 	  } else if(showWrongCommand) {
 		  if(showingMessage == 0) {
+			  showingMessage = 1;
 			  showTimer = 0;
 			  showEnd = 0;
 			  sprintf((char *)disp.f_line, "  Command not");
@@ -630,7 +673,6 @@ int main(void)
 				  sendPayload("Display error");
 			  }
 		  }
-		  showingMessage = 1;
 		  if(showEnd) {
 			  showWrongCommand = 0;
 			  showingMessage = 0;
@@ -638,25 +680,25 @@ int main(void)
 		  }
 	  } else if(showUnit) {
 		  if(!cycle && !showingMessage) {
+			  showingMessage = 1;
 			  showTemp(1);
 		  }
-		  showingMessage = 1;
+
 		  if(cycle) {
 			  showUnit = 0;
 			  showingMessage = 0;
 		  }
 	  } else if(showInterval) {
 		  if(showingMessage == 0) {
+			  showingMessage = 1;
 			  showTimer = 0;
 			  showEnd = 0;
 			  sprintf((char *)disp.f_line, "Interval was");
 			  sprintf((char *)disp.s_line, "set to %dms", showIntervalValue);
-
 			  if(lcd_display(&disp) == 0) {
 				  sendPayload("Display error");
 			  }
 		  }
-		  showingMessage = 1;
 		  if(showEnd) {
 			  showInterval = 0;
 			  showingMessage = 0;
@@ -664,6 +706,7 @@ int main(void)
 		  }
 	  } else if(showIntervalError) {
 		  if(showingMessage == 0) {
+			  showingMessage = 1;
 			  showTimer = 0;
 			  showEnd = 0;
 			  sprintf((char *)disp.f_line, " Interval can't");
@@ -673,7 +716,6 @@ int main(void)
 				  sendPayload("Display error");
 			  }
 		  }
-		  showingMessage = 1;
 		  if(showEnd) {
 			  showIntervalError = 0;
 			  showingMessage = 0;
@@ -681,6 +723,7 @@ int main(void)
 		  }
 	  } else if(showWrongFrameSize) {
 		  if(showingMessage == 0) {
+			  showingMessage = 1;
 			  showTimer = 0;
 			  showEnd = 0;
 			  sprintf((char *)disp.f_line, "   Wrong frame");
@@ -690,7 +733,6 @@ int main(void)
 				  sendPayload("Display error");
 			  }
 		  }
-		  showingMessage = 1;
 		  if(showEnd) {
 			  showWrongFrameSize = 0;
 			  showingMessage = 0;
