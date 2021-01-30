@@ -1,0 +1,5 @@
+.settings/
+Debug/
+Drivers/
+projekt_v1 Debug.launch
+STM32F103RBTX_FLASH
